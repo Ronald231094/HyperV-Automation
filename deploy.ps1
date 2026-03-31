@@ -341,7 +341,7 @@ foreach ($vmName in $vmNames) {
     try {
         New-VM -Name $vmName -Generation $vmGen -MemoryStartupBytes 2GB `
                -VHDPath $vhdPath -SwitchName $switchName -Path $vmPath | Out-Null
-        Set-VMProcessor -VMName $vmName -Count 2
+        Set-VMProcessor -VMName $vmName -Count 4
         # Set-VMFirmware only applies to Gen 2 VMs; silently skip for Gen 1.
         if ($vmGen -eq 2) {
             Set-VMFirmware -VMName $vmName -EnableSecureBoot Off -ErrorAction SilentlyContinue
@@ -357,7 +357,7 @@ foreach ($vmName in $vmNames) {
 # ─── Verify and fix computer names in OS ──────────────────────────────────────
 Write-Host "`nVerifying computer names in guest OS..." -ForegroundColor Cyan
 $hostnameVerified = $false
-$maxRetries = 24  # 24 x 15 s = 6 minutes
+$maxRetries = 72  # 72 x 15 s = 18 minutes
 $retryCount = 0
 
 while (-not $hostnameVerified -and $retryCount -lt $maxRetries) {
