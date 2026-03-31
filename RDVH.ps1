@@ -5,6 +5,11 @@
 .DESCRIPTION
     Chains DC creation, VM deployment, domain join, nested-virtualisation setup,
     Hyper-V role install inside RDVH guests, and RDS VDI role configuration.
+
+    Parallel deployment uses Start-Job (not Start-Process) so that child
+    jobs inherit the elevated token of the parent session — fixing the
+    -196608 / #Requires -RunAsAdministrator failure that occurs when
+    Start-Process spawns new windows without -Verb RunAs.
 #>
 
 param(
@@ -33,24 +38,24 @@ if (-not $transcriptActive) {
 }
 
 function Stop-Safe { if (-not $transcriptActive) { try { Stop-Transcript } catch { } } }
-function Exit-Script ([int]$Code = 1) { 
+function Exit-Script ([int]$Code = 1) {
     Write-ReplayCommand
     Stop-Safe
-    exit $Code 
+    exit $Code
 }
 
 function Write-ReplayCommand {
     Write-Host "`n" -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "  REPLAY COMMAND (copy-paste to rerun)" -ForegroundColor Cyan
+    Write-Host "  REPLAY COMMAND (copy-paste to rerun)"   -ForegroundColor Cyan
     Write-Host "==========================================" -ForegroundColor Cyan
-    
-    $vmNamesStr = $VMNames -join ','
-    $vhNamesStr = $VHNames -join ','
+
+    $vmNamesStr  = $VMNames  -join ','
+    $vhNamesStr  = $VHNames  -join ','
     $licNamesStr = $LicNames -join ','
-    $gwNamesStr = $GWNames -join ','
-    
-    $cmd = "& '$($MyInvocation.ScriptName)'"
+    $gwNamesStr  = $GWNames  -join ','
+
+    $cmd  = "& '$($MyInvocation.ScriptName)'"
     $cmd += " -DCName '$DCName'"
     $cmd += " -DomainName '$DomainName'"
     $cmd += " -DCOS '$DCOS'"
@@ -61,7 +66,7 @@ function Write-ReplayCommand {
     $cmd += " -WAName '$WAName'"
     $cmd += " -LicNames '$licNamesStr'"
     $cmd += " -GWNames '$gwNamesStr'"
-    
+
     Write-Host $cmd -ForegroundColor Yellow
     Write-Host "`n" -ForegroundColor Cyan
 }
@@ -69,15 +74,14 @@ function Write-ReplayCommand {
 $currentDir = $PSScriptRoot
 
 # ─── Prompt for missing parameters ───────────────────────────────────────────
-if (-not $DCName)    { $DCName     = Read-Host "Enter Domain Controller VM Name" }
-if (-not $DomainName){ $DomainName = Read-Host "Enter Domain Name (e.g., corp.local)" }
-if (-not $DCOS)      { $DCOS       = Read-Host "Enter OS for Domain Controller" }
+if (-not $DCName)     { $DCName     = Read-Host "Enter Domain Controller VM Name" }
+if (-not $DomainName) { $DomainName = Read-Host "Enter Domain Name (e.g., corp.local)" }
+if (-not $DCOS)       { $DCOS       = Read-Host "Enter OS for Domain Controller" }
 
 if ($null -eq $VMNames) {
     $VMNames = @((Read-Host "Enter all domain member VM names (comma-separated)") -split ',' |
                  ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 } else {
-    # Convert comma-separated string parameter to array
     $VMNames = @($VMNames -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 }
 if (-not $MemberOS) { $MemberOS = Read-Host "Enter OS for all member VMs" }
@@ -92,7 +96,6 @@ if ($null -eq $VHNames) {
     $VHNames = @((Read-Host "Enter RD Virtualization Host VM Names (comma-separated)") -split ',' |
                  ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 } else {
-    # Convert comma-separated string parameter to array
     $VHNames = @($VHNames -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 }
 foreach ($vh in $VHNames) {
@@ -112,7 +115,6 @@ if ($null -eq $LicNames) {
     $LicNames = @((Read-Host "Enter RD Licensing VM Names (comma-separated)") -split ',' |
                   ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 } else {
-    # Convert comma-separated string parameter to array
     $LicNames = @($LicNames -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 }
 foreach ($lic in $LicNames) {
@@ -126,7 +128,6 @@ if ($null -eq $GWNames) {
     $GWNames = @((Read-Host "Enter RD Gateway VM Names (comma-separated)") -split ',' |
                  ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 } else {
-    # Convert comma-separated string parameter to array
     $GWNames = @($GWNames -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
 }
 foreach ($gw in $GWNames) {
@@ -149,19 +150,147 @@ if ([string]::IsNullOrWhiteSpace($DomainInitCode)) {
 $secureCode      = ConvertTo-SecureString $DomainInitCode -AsPlainText -Force
 $domainAdminCred = New-Object System.Management.Automation.PSCredential ("$DomainName\$DomainAdmin", $secureCode)
 
-# ─── Step 1: Domain Controller ────────────────────────────────────────────────
-Write-Host "`nCreating Domain Controller '$DCName'..." -ForegroundColor Cyan
-& (Join-Path $currentDir "createDC.ps1") -OS $DCOS -VMName $DCName -DomainName $DomainName
-if ($LASTEXITCODE -ne 0) { Write-Error "createDC.ps1 failed."; Exit-Script 1 }
+# ─── Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job ──────────
+# FIX: Start-Job inherits the parent's elevated token, so #Requires -RunAsAdministrator
+# in the child scripts is satisfied without needing -Verb RunAs or UAC prompts.
+# Start-Process without -Verb RunAs spawns a non-elevated child (exit code -196608).
+Write-Host "`n=== Starting Parallel VM Deployment ===" -ForegroundColor Cyan
+Write-Host "  [1] Domain Controller: $DCName (OS: $DCOS)" -ForegroundColor Yellow
+Write-Host "  [2] Member VMs: $($VMNames -join ', ') (OS: $MemberOS)" -ForegroundColor Yellow
 
-# ─── Step 2: Member VMs ───────────────────────────────────────────────────────
-$VMListString = $VMNames -join ','
-Write-Host "`nDeploying member VMs: $VMListString (OS: $MemberOS)..." -ForegroundColor Cyan
-& (Join-Path $currentDir "deploy.ps1") -VMName $VMListString -OS $MemberOS
-if ($LASTEXITCODE -ne 0) { Write-Error "deploy.ps1 failed."; Exit-Script 1 }
+$dcScriptPath     = Join-Path $currentDir "createDC.ps1"
+$deployScriptPath = Join-Path $currentDir "deploy.ps1"
+$VMListString     = $VMNames -join ','
 
-# VMs are already verified reachable and hostname-correct by deploy.ps1
-# No additional initialization wait needed
+if (-not (Test-Path $dcScriptPath)) {
+    Write-Error "Child script not found: $dcScriptPath"
+    Exit-Script 1
+}
+if (-not (Test-Path $deployScriptPath)) {
+    Write-Error "Child script not found: $deployScriptPath"
+    Exit-Script 1
+}
+
+Write-Host "`nLaunching parallel deployment jobs..." -ForegroundColor Cyan
+Write-Host "  -> Starting DC deployment job..." -ForegroundColor Gray
+Write-Host "  -> Starting member VM deployment job..." -ForegroundColor Gray
+
+# DC job — dot-sources createDC.ps1 inside the job runspace
+$dcJob = Start-Job -Name "DCDeploy" -ScriptBlock {
+    param($script, $os, $vmName, $domainName)
+    & $script -OS $os -VMName $vmName -DomainName $domainName
+    # Return the exit code as the last output value so the parent can inspect it
+    $LASTEXITCODE
+} -ArgumentList $dcScriptPath, $DCOS, $DCName, $DomainName
+
+# Member VM job — dot-sources deploy.ps1 inside the job runspace
+$deployJob = Start-Job -Name "MemberDeploy" -ScriptBlock {
+    param($script, $vmList, $os)
+    & $script -VMName $vmList -OS $os
+    $LASTEXITCODE
+} -ArgumentList $deployScriptPath, $VMListString, $MemberOS
+
+# ─── Stream job output live to the transcript ─────────────────────────────────
+Write-Host "`nWaiting for deployment jobs to complete (streaming output below)..." -ForegroundColor Cyan
+
+$pollInterval = 5   # seconds between output polls
+while ($true) {
+    # Flush any pending output from both jobs
+    $dcJob     | Receive-Job | ForEach-Object { Write-Host "  [DC]     $_" }
+    $deployJob | Receive-Job | ForEach-Object { Write-Host "  [MEMBER] $_" }
+
+    $dcDone     = $dcJob.State     -in @('Completed','Failed','Stopped')
+    $deployDone = $deployJob.State -in @('Completed','Failed','Stopped')
+
+    if ($dcDone -and $deployDone) { break }
+
+    Start-Sleep -Seconds $pollInterval
+}
+
+# Final flush after both jobs finish
+$dcJob     | Receive-Job | ForEach-Object { Write-Host "  [DC]     $_" }
+$deployJob | Receive-Job | ForEach-Object { Write-Host "  [MEMBER] $_" }
+
+# ─── Collect results ──────────────────────────────────────────────────────────
+# The last value emitted by each job scriptblock is $LASTEXITCODE from the child script.
+# Receive-Job was already flushed above, so inspect child info directly.
+$dcJobInfo     = Get-Job -Name "DCDeploy"
+$deployJobInfo = Get-Job -Name "MemberDeploy"
+
+# A job that throws an unhandled terminating error lands in Failed state.
+# Treat anything other than Completed as a failure.
+$dcSuccess     = ($dcJobInfo.State     -eq 'Completed') -and ($dcJobInfo.ChildJobs[0].Error.Count -eq 0)
+$deploySuccess = ($deployJobInfo.State -eq 'Completed') -and ($deployJobInfo.ChildJobs[0].Error.Count -eq 0)
+
+Write-Host "`n=== Deployment Results ===" -ForegroundColor Cyan
+if ($dcSuccess) {
+    Write-Host "  [OK]   Domain Controller deployment completed" -ForegroundColor Green
+} else {
+    Write-Host "  [FAIL] Domain Controller deployment failed (job state: $($dcJobInfo.State))" -ForegroundColor Red
+    # Surface any terminating errors from the job
+    $dcJobInfo.ChildJobs[0].Error | ForEach-Object { Write-Host "         Error: $_" -ForegroundColor Red }
+}
+
+if ($deploySuccess) {
+    Write-Host "  [OK]   Member VM deployment completed" -ForegroundColor Green
+} else {
+    Write-Host "  [FAIL] Member VM deployment failed (job state: $($deployJobInfo.State))" -ForegroundColor Red
+    $deployJobInfo.ChildJobs[0].Error | ForEach-Object { Write-Host "         Error: $_" -ForegroundColor Red }
+}
+
+# Clean up job objects
+Remove-Job -Name "DCDeploy","MemberDeploy" -Force -ErrorAction SilentlyContinue
+
+if (-not $dcSuccess -or -not $deploySuccess) {
+    Write-Error "One or more deployment jobs failed. Review the output above."
+    Exit-Script 1
+}
+
+Write-Host "`nAll VMs deployed successfully via parallel jobs." -ForegroundColor Green
+
+# ─── Verify all VMs are reachable before domain join ─────────────────────────
+Write-Host "`n=== Verifying VM Readiness ===" -ForegroundColor Cyan
+$allVMs              = @($DCName) + $VMNames
+$verificationTimeout = 300   # 5 minutes total
+$verificationInterval = 10   # check every 10 seconds
+$elapsed             = 0
+$allReady            = $false
+
+while (-not $allReady -and $elapsed -lt $verificationTimeout) {
+    $allReady    = $true
+    $readyCount  = 0
+
+    foreach ($vmName in $allVMs) {
+        try {
+            $testResult = Invoke-Command -VMName $vmName -Credential $domainAdminCred `
+                -ErrorAction Stop -ScriptBlock { "OK" }
+
+            if ($testResult -eq "OK") {
+                Write-Host "  [OK] $vmName - Ready" -ForegroundColor Green
+                $readyCount++
+            }
+        } catch {
+            $progressMsg = "${elapsed}/${verificationTimeout} seconds"
+            Write-Host "  [X] $vmName - Not reachable yet ($progressMsg)" -ForegroundColor Yellow
+            $allReady = $false
+        }
+    }
+
+    if (-not $allReady) {
+        $retryMsg = "Retrying in ${verificationInterval} s"
+        Write-Host "  Progress: $readyCount/$($allVMs.Count) VMs ready. $retryMsg" -ForegroundColor Gray
+        Start-Sleep -Seconds $verificationInterval
+        $elapsed += $verificationInterval
+    }
+}
+
+if ($allReady) {
+    Write-Host "`n[OK] All $($allVMs.Count) VMs are ready for domain join." -ForegroundColor Green
+} else {
+    $timeoutMsg = "${verificationTimeout}s"
+    Write-Error "VM verification timed out after $timeoutMsg. Some VMs may not be ready."
+    Exit-Script 1
+}
 
 # ─── Step 3: Domain Join ──────────────────────────────────────────────────────
 $allToJoin = ($VMNames + @($CBName) | Select-Object -Unique) -join ','
@@ -179,19 +308,15 @@ Write-Host "`n[Pre-RDS] Enabling nested virtualisation on RDVH VMs..." -Foregrou
 foreach ($vh in $VHNames) {
     Write-Host "  -> Processing: '$vh'..." -ForegroundColor Cyan
     try {
-        $vmObj = Get-VM -Name $vh -ErrorAction Stop
+        $vmObj     = Get-VM -Name $vh -ErrorAction Stop
         $wasRunning = $vmObj.State -eq 'Running'
 
         if ($wasRunning) {
             Write-Host "     Stopping '$vh' to apply processor setting..."
             Stop-VM -Name $vh -Force -ErrorAction Stop
-            # BUG FIX: Wait until the VM actually reaches the Off state rather than
-            # sleeping a fixed 15 s (which may be insufficient on slow storage).
             $stopTimeout = (Get-Date).AddMinutes(2)
             while ((Get-VM -Name $vh).State -ne 'Off') {
-                if ((Get-Date) -gt $stopTimeout) {
-                    throw "Timed out waiting for '$vh' to stop."
-                }
+                if ((Get-Date) -gt $stopTimeout) { throw "Timed out waiting for '$vh' to stop." }
                 Start-Sleep -Seconds 3
             }
         }
@@ -201,12 +326,9 @@ foreach ($vh in $VHNames) {
 
         if ($wasRunning) {
             Start-VM -Name $vh -ErrorAction Stop
-            # BUG FIX: Similarly wait for the VM to reach Running before continuing.
             $startTimeout = (Get-Date).AddMinutes(2)
             while ((Get-VM -Name $vh).State -ne 'Running') {
-                if ((Get-Date) -gt $startTimeout) {
-                    throw "Timed out waiting for '$vh' to start."
-                }
+                if ((Get-Date) -gt $startTimeout) { throw "Timed out waiting for '$vh' to start." }
                 Start-Sleep -Seconds 3
             }
             Write-Host "     '$vh' is running again." -ForegroundColor Green
@@ -228,9 +350,6 @@ foreach ($vh in $VHNames) {
         Invoke-Command -VMName $vh -Credential $domainAdminCred -ErrorAction Stop -ScriptBlock {
             $feature = Get-WindowsFeature -Name Hyper-V
             if ($feature.InstallState -ne 'Installed') {
-                # BUG FIX: Install-WindowsFeature -Restart inside PS Direct reboots
-                # the guest and abruptly kills the session, which PowerShell reports as
-                # an error. Install without -Restart and reboot manually so the caller can handle it.
                 $result = Install-WindowsFeature -Name Hyper-V -IncludeManagementTools `
                                                  -ErrorAction Stop
                 if (-not $result.Success) { throw "Hyper-V feature install failed." }
@@ -262,15 +381,14 @@ $WAFQDN  = "$WAName.$DomainName"
 $VHFQDNs = $VHNames | ForEach-Object { "$_.$DomainName" }
 
 Write-Host "`nCreating RDS Virtual Desktop Deployment..." -ForegroundColor Cyan
-# BUG FIX: Same issue as RDS.ps1 — run this on the CB, not the DC.
 try {
     Invoke-Command -VMName $CBName -Credential $domainAdminCred -ErrorAction Stop -ScriptBlock {
         param($cb, $wa, $vhs)
         Import-Module RemoteDesktop -ErrorAction Stop
         New-RDVirtualDesktopDeployment `
-            -ConnectionBroker    $cb  `
-            -WebAccessServer     $wa  `
-            -VirtualizationHost  $vhs
+            -ConnectionBroker   $cb  `
+            -WebAccessServer    $wa  `
+            -VirtualizationHost $vhs
     } -ArgumentList $CBFQDN, $WAFQDN, $VHFQDNs
 } catch {
     Write-Error "New-RDVirtualDesktopDeployment failed: $_"

@@ -135,7 +135,9 @@ if ($installOnHost) {
     $adminCred = New-Object System.Management.Automation.PSCredential ("Administrator", $initStr)
 
     Write-Host "`nDeploying DHCP VM..." -ForegroundColor Cyan
-    & (Join-Path $currentDir "deploy.ps1") -VMName $vmName -OS $osYear -InitCode $initStr
+    # -SkipDHCPCheck: we are creating the DHCP VM itself, so no DHCP server
+    # exists yet. Without this flag deploy.ps1 would abort at the DHCP gate.
+    & (Join-Path $currentDir "deploy.ps1") -VMName $vmName -OS $osYear -InitCode $initStr -SkipDHCPCheck
     if ($LASTEXITCODE -ne 0) {
         Write-Error "deploy.ps1 failed for DHCP VM."
         Exit-Script 1
@@ -160,19 +162,104 @@ if ($installOnHost) {
         Exit-Script 1
     }
 
-    Write-Host "Configuring DHCP role inside VM..." -ForegroundColor Cyan
+    # ── Phase 1: install feature + set static IP, then reboot ───────────────────
+    # ALL DHCP service cmdlets (Add-DhcpServerv4Scope, Set-DhcpServerv4OptionValue,
+    # Set-DhcpServerv4Binding) require the DHCP Windows Service to be running.
+    # That service only starts after the post-feature-install reboot completes.
+    # Calling any of them here produces terminating WMI errors regardless of
+    # -ErrorAction. Phase 1 therefore only touches things that don't need the
+    # service: feature install, security group, static IP assignment, then reboot.
+    Write-Host "Configuring DHCP VM (Phase 1: install feature + static IP)..." -ForegroundColor Cyan
     try {
         Invoke-Command -VMName $vmName -Credential $adminCred -ErrorAction Stop -ScriptBlock {
-            param($gw, $netAddr, $mask, $start, $end, $prefix)
+            param($gw, $start, $prefix)
 
+            # ── Step 1: assign static IP before installing anything ────────────────
+            # The DHCP VM has no DHCP server to get a lease from (it IS the DHCP
+            # server). Its NIC will stay APIPA indefinitely. Find the first non-
+            # loopback physical adapter by interface index and assign the static IP
+            # immediately — no waiting for a lease required.
+            $staticIp = ($start -replace '\.\d+$', '.253')
+            $adapter  = Get-NetAdapter -ErrorAction SilentlyContinue |
+                        Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notmatch 'Loopback' } |
+                        Sort-Object -Property ifIndex |
+                        Select-Object -First 1
+            if (-not $adapter) { throw "No active network adapter found inside the VM." }
+            $alias = $adapter.Name
+            Write-Host "  -> Adapter found: '$alias'. Assigning static IP $staticIp..."
+
+            # Remove any existing addresses (APIPA or otherwise) then set static.
+            Get-NetIPAddress -InterfaceAlias $alias -AddressFamily IPv4 `
+                             -ErrorAction SilentlyContinue |
+                Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+            New-NetIPAddress -InterfaceAlias $alias `
+                             -IPAddress      $staticIp `
+                             -PrefixLength   $prefix `
+                             -DefaultGateway $gw `
+                             -ErrorAction Stop
+            # Set-DnsClientServerAddress so the VM can resolve names post-domain-join.
+            Set-DnsClientServerAddress -InterfaceAlias $alias -ServerAddresses @('8.8.8.8') `
+                                       -ErrorAction SilentlyContinue
+            Write-Host "  -> Static IP $staticIp set on '$alias'."
+
+            # ── Step 2: install DHCP feature now that the NIC is configured ────────
             $feat = Install-WindowsFeature -Name DHCP -IncludeManagementTools -ErrorAction Stop
             if (-not $feat.Success) { throw "DHCP feature install failed." }
 
+            # Security group is a local group — safe to add pre-reboot.
             Add-DhcpServerSecurityGroup -ErrorAction SilentlyContinue
 
-            # BUG FIX: Same as host path — avoid netsh; use Set-DhcpServerv4Binding.
-            Set-DhcpServerv4Binding -InterfaceAlias "Ethernet" -BindingState $true -ErrorAction SilentlyContinue
+            Write-Host "Feature installed. Rebooting..."
+            Restart-Computer -Force
+        } -ArgumentList $gateway, $dhcpStart, $prefixLength
+    } catch {
+        $exType = $_.Exception.GetType().Name
+        $exMsg  = $_.Exception.Message
+        $isExpectedDisconnect = ($exType -match 'PSRemotingTransportException|PipelineStoppedException') -or
+                                ($exMsg  -match 'The pipeline has been stopped|connection.*closed|virtual machine.*turned off')
+        if (-not $isExpectedDisconnect) {
+            Write-Error "DHCP VM configuration failed (Phase 1): $_"
+            Exit-Script 1
+        }
+        Write-Host "  -> DHCP VM rebooting after feature install (expected)." -ForegroundColor Yellow
+    }
 
+    # ── Phase 2: scope, options, and binding — DHCP service is now running ───────
+    Write-Host "Waiting for DHCP VM to come back up after reboot (up to 3 minutes)..." -ForegroundColor Cyan
+    $staticIp = ($dhcpStart -replace '\.\d+$', '.253')
+    $ready2   = $false
+    $timeout2 = (Get-Date).AddMinutes(3)
+    while (-not $ready2 -and (Get-Date) -lt $timeout2) {
+        try {
+            Invoke-Command -VMName $vmName -Credential $adminCred -ErrorAction Stop `
+                           -ScriptBlock { $true } | Out-Null
+            $ready2 = $true
+        } catch { Start-Sleep -Seconds 5 }
+    }
+    if (-not $ready2) {
+        Write-Error "DHCP VM did not come back up within 3 minutes after reboot."
+        Exit-Script 1
+    }
+
+    Write-Host "Configuring DHCP scope, options, and binding (Phase 2)..." -ForegroundColor Cyan
+    try {
+        Invoke-Command -VMName $vmName -Credential $adminCred -ErrorAction Stop -ScriptBlock {
+            param($gw, $netAddr, $mask, $start, $end)
+
+            # The static IP was set in Phase 1, so discover the adapter the same
+            # way — first non-loopback adapter by index, no IP polling needed.
+            $labAdapter = Get-NetAdapter -ErrorAction SilentlyContinue |
+                          Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notmatch 'Loopback' } |
+                          Sort-Object -Property ifIndex |
+                          Select-Object -First 1
+            if (-not $labAdapter) { throw "No active network adapter found in VM for DHCP binding." }
+
+            # Bind the DHCP service — service is now running post-reboot.
+            Set-DhcpServerv4Binding -InterfaceAlias $labAdapter.InterfaceAlias `
+                                    -BindingState $true -ErrorAction Stop
+            Write-Host "  [OK]  DHCP bound to adapter: $($labAdapter.InterfaceAlias)"
+
+            # Create scope if not already present (idempotent).
             $existing = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue |
                         Where-Object { $_.StartRange.ToString() -eq $start }
             if (-not $existing) {
@@ -186,37 +273,18 @@ if ($installOnHost) {
             Set-DhcpServerv4OptionValue -ScopeId $netAddr -Router    @($gw)       -ErrorAction Stop
             Set-DhcpServerv4OptionValue -ScopeId $netAddr -DnsServer @("8.8.8.8") -ErrorAction Stop
 
-            # BUG FIX: $dhcpStart is 192.168.x.2 — assigning that as the VM's own static
-            # IP means the first DHCP lease would collide with the server's own address.
-            # The server should use .1 + 1 = the gateway? No — the gateway is the Hyper-V
-            # host adapter. Use a distinct static IP outside the DHCP pool (e.g., .253).
-            # We derive it from the start address by replacing last octet with 253.
-            $staticIp = ($start -replace '\.\d+$', '.253')
-            $existing = Get-NetIPAddress -InterfaceAlias "Ethernet" -AddressFamily IPv4 `
-                                         -ErrorAction SilentlyContinue |
-                        Where-Object { $_.IPAddress -eq $staticIp }
-            if (-not $existing) {
-                New-NetIPAddress -InterfaceAlias "Ethernet" `
-                                 -IPAddress      $staticIp `
-                                 -PrefixLength   $prefix `
-                                 -DefaultGateway $gw `
-                                 -ErrorAction Stop
-            }
+            # Suppress Server Manager post-install nag.
+            Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\ServerManager\Roles\12" `
+                             -Name "ConfigurationState" -Value 2 -ErrorAction SilentlyContinue
 
-            Write-Host "DHCP configured: $start - $end, Gateway: $gw, Static IP: $staticIp"
-            Restart-Computer -Force
-        } -ArgumentList $gateway, $networkAddr, $subnetMask, $dhcpStart, $dhcpEnd, $prefixLength
+            Write-Host "  [OK]  Scope $start - $end configured. Router: $gw"
+        } -ArgumentList $gateway, $networkAddr, $subnetMask, $dhcpStart, $dhcpEnd
     } catch {
-        $exType = $_.Exception.GetType().Name
-        $exMsg  = $_.Exception.Message
-        $isExpectedDisconnect = ($exType -match 'PSRemotingTransportException|PipelineStoppedException') -or
-                                ($exMsg  -match 'The pipeline has been stopped|connection.*closed|virtual machine.*turned off')
-        if (-not $isExpectedDisconnect) {
-            Write-Error "DHCP VM configuration failed: $_"
-            Exit-Script 1
-        }
-        Write-Host "  -> DHCP VM rebooting after configuration (expected)." -ForegroundColor Yellow
+        Write-Error "DHCP VM configuration failed (Phase 2): $_"
+        Exit-Script 1
     }
+
+    Write-Host "  [OK]  DHCP VM fully configured. Static IP: $staticIp" -ForegroundColor Green
 }
 
 Write-Host "`nDHCP setup complete." -ForegroundColor Green

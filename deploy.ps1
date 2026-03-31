@@ -22,7 +22,12 @@ param (
     [string]$OS,
 
     [Parameter(Mandatory = $false)]
-    [System.Security.SecureString]$InitCode
+    [System.Security.SecureString]$InitCode,
+
+    # Skip the DHCP availability gate. Used by DHCP.ps1 when deploying the
+    # DHCP VM itself — at that point no DHCP server exists yet by definition.
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipDHCPCheck
 )
 
 # ─── Transcript Safety ────────────────────────────────────────────────────────
@@ -141,67 +146,72 @@ if (Test-Path $switchFile) {
 Write-Host "Using virtual switch: $switchName"
 
 # ─── DHCP availability check ──────────────────────────────────────────────────
-$dhcpAvailable = $false
-Write-Host "Validating DHCP availability..." -ForegroundColor Cyan
+# Skipped when -SkipDHCPCheck is passed (e.g. DHCP.ps1 bootstrapping the DHCP VM).
+if ($SkipDHCPCheck) {
+    Write-Host "Skipping DHCP availability check (-SkipDHCPCheck specified)." -ForegroundColor Yellow
+} else {
+    $dhcpAvailable = $false
+    Write-Host "Validating DHCP availability..." -ForegroundColor Cyan
 
-$osCaption = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
-$hasSM     = [bool](Get-Command -Name Get-WindowsFeature -ErrorAction SilentlyContinue)
+    $osCaption = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
+    $hasSM     = [bool](Get-Command -Name Get-WindowsFeature -ErrorAction SilentlyContinue)
 
-if ($osCaption -match "Server" -and $hasSM) {
-    Write-Host "  -> Checking host-based DHCP role..."
-    try {
-        $dhcpFeat = Get-WindowsFeature -Name DHCP -ErrorAction SilentlyContinue
-        if ($dhcpFeat -and $dhcpFeat.Installed) {
-            $scope = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue | Where-Object {
-                $_.StartRange.ToString() -eq $dhcpStart -and $_.EndRange.ToString() -eq $dhcpEnd
+    if ($osCaption -match "Server" -and $hasSM) {
+        Write-Host "  -> Checking host-based DHCP role..."
+        try {
+            $dhcpFeat = Get-WindowsFeature -Name DHCP -ErrorAction SilentlyContinue
+            if ($dhcpFeat -and $dhcpFeat.Installed) {
+                $scope = Get-DhcpServerv4Scope -ErrorAction SilentlyContinue | Where-Object {
+                    $_.StartRange.ToString() -eq $dhcpStart -and $_.EndRange.ToString() -eq $dhcpEnd
+                }
+                if ($scope) {
+                    $dhcpAvailable = $true
+                    Write-Host "  [OK]  Host DHCP role active with matching scope." -ForegroundColor Green
+                }
             }
-            if ($scope) {
-                $dhcpAvailable = $true
-                Write-Host "  [OK]  Host DHCP role active with matching scope." -ForegroundColor Green
-            }
-        }
-    } catch { }
-}
+        } catch { }
+    }
 
-if (-not $dhcpAvailable) {
-    Write-Host "  -> Checking for DHCP VM..."
-    $dhcpVm = Get-VM -Name "DHCP" -ErrorAction SilentlyContinue
-    if ($dhcpVm) {
-        if ($dhcpVm.State -ne 'Running') {
-            Write-Host "  -> DHCP VM found but not running. Auto-starting..." -ForegroundColor Yellow
-            Start-VM -Name "DHCP" -ErrorAction SilentlyContinue
-        }
-        Write-Host "  -> Waiting up to 60 s for DHCP VM to report an IP..." -ForegroundColor Cyan
-        for ($i = 0; $i -lt 12; $i++) {
-            # BUG FIX: Re-fetch the VM object each iteration; the IP list is only
-            # populated after Integration Services updates the KVP, so using the
-            # stale $dhcpVm object always returns empty on the first few polls.
-            $ips = (Get-VM -Name "DHCP" -ErrorAction SilentlyContinue).NetworkAdapters.IPAddresses |
-                   Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }
-            if ($ips) { $dhcpAvailable = $true; break }
-            Start-Sleep -Seconds 5
-        }
-        if ($dhcpAvailable) {
-            Write-Host "  [OK]  DHCP VM is running." -ForegroundColor Green
-        } else {
-            Write-Warning "DHCP VM did not report an IP within 60 s."
+    if (-not $dhcpAvailable) {
+        Write-Host "  -> Checking for DHCP VM..."
+        $dhcpVm = Get-VM -Name "DHCP" -ErrorAction SilentlyContinue
+        if ($dhcpVm) {
+            if ($dhcpVm.State -ne 'Running') {
+                Write-Host "  -> DHCP VM found but not running. Auto-starting..." -ForegroundColor Yellow
+                Start-VM -Name "DHCP" -ErrorAction SilentlyContinue
+            }
+            Write-Host "  -> Waiting up to 60 s for DHCP VM to report an IP..." -ForegroundColor Cyan
+            for ($i = 0; $i -lt 12; $i++) {
+                # BUG FIX: Re-fetch the VM object each iteration; the IP list is only
+                # populated after Integration Services updates the KVP, so using the
+                # stale $dhcpVm object always returns empty on the first few polls.
+                $ips = (Get-VM -Name "DHCP" -ErrorAction SilentlyContinue).NetworkAdapters.IPAddresses |
+                       Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }
+                if ($ips) { $dhcpAvailable = $true; break }
+                Start-Sleep -Seconds 5
+            }
+            if ($dhcpAvailable) {
+                Write-Host "  [OK]  DHCP VM is running." -ForegroundColor Green
+            } else {
+                Write-Warning "DHCP VM did not report an IP within 60 s."
+            }
         }
     }
-}
 
-if (-not $dhcpAvailable) {
-    Write-Host ""
-    Write-Host "========================================" -ForegroundColor Red
-    Write-Host " DHCP SERVICE NOT AVAILABLE"             -ForegroundColor Red
-    Write-Host "========================================" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "VMs require DHCP to obtain IP addresses. Please run one of:" -ForegroundColor Yellow
-    Write-Host "  1. .\DHCP.ps1   (Install DHCP on this host)"          -ForegroundColor Cyan
-    Write-Host "  2. Deploy a VM named 'DHCP' (VM-based DHCP)"          -ForegroundColor Cyan
-    Write-Host ""
-    Write-Host "Then retry: .\deploy.ps1 -VMName `"$VMName`" -OS $OS"  -ForegroundColor Cyan
-    Write-Host ""
-    Exit-Script 1
+    if (-not $dhcpAvailable) {
+        Write-Host ""
+        Write-Host "========================================" -ForegroundColor Red
+        Write-Host " DHCP SERVICE NOT AVAILABLE"             -ForegroundColor Red
+        Write-Host "========================================" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "VMs require DHCP to obtain IP addresses. Please run one of:" -ForegroundColor Yellow
+        Write-Host "  1. .\DHCP.ps1   (Install DHCP on this host)"          -ForegroundColor Cyan
+        Write-Host "  2. Deploy a VM named 'DHCP' (VM-based DHCP)"          -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "Then retry: .\deploy.ps1 -VMName `"$VMName`" -OS $OS"  -ForegroundColor Cyan
+        Write-Host ""
+        Exit-Script 1
+    }
 }
 
 # ─── Credentials ──────────────────────────────────────────────────────────────
