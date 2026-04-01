@@ -109,16 +109,93 @@ if ([string]::IsNullOrWhiteSpace($DomainInitCode)) {
 $secureCode      = ConvertTo-SecureString $DomainInitCode -AsPlainText -Force
 $domainAdminCred = New-Object System.Management.Automation.PSCredential ("$DomainName\$DomainAdmin", $secureCode)
 
-# ─── Step 1: Domain Controller ────────────────────────────────────────────────
-Write-Host "`nCreating Domain Controller '$DCName'..." -ForegroundColor Cyan
-& (Join-Path $currentDir "createDC.ps1") -OS $DCOS -VMName $DCName -DomainName $DomainName
-if ($LASTEXITCODE -ne 0) { Write-Error "createDC.ps1 failed."; Exit-Script 1 }
+# ─── Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job ────
+# FIX: Start-Job inherits the parent's elevated token, so #Requires -RunAsAdministrator
+# in the child scripts is satisfied without needing -Verb RunAs or UAC prompts.
+Write-Host "`n=== Starting Parallel VM Deployment ===" -ForegroundColor Cyan
+Write-Host "  [1] Domain Controller: $DCName (OS: $DCOS)" -ForegroundColor Yellow
+Write-Host "  [2] Member VMs: $($VMNames -join ', ') (OS: $MemberOS)" -ForegroundColor Yellow
 
-# ─── Step 2: Member VMs ───────────────────────────────────────────────────────
-$VMListString = $VMNames -join ','
-Write-Host "`nDeploying member VMs: $VMListString (OS: $MemberOS)..." -ForegroundColor Cyan
-& (Join-Path $currentDir "deploy.ps1") -VMName $VMListString -OS $MemberOS
-if ($LASTEXITCODE -ne 0) { Write-Error "deploy.ps1 failed."; Exit-Script 1 }
+$dcScriptPath     = Join-Path $currentDir "createDC.ps1"
+$deployScriptPath = Join-Path $currentDir "deploy.ps1"
+$VMListString     = $VMNames -join ','
+
+if (-not (Test-Path $dcScriptPath)) {
+    Write-Error "Child script not found: $dcScriptPath"
+    Exit-Script 1
+}
+if (-not (Test-Path $deployScriptPath)) {
+    Write-Error "Child script not found: $deployScriptPath"
+    Exit-Script 1
+}
+
+Write-Host "`nLaunching parallel deployment jobs..." -ForegroundColor Cyan
+Write-Host "  -> Starting DC deployment job..." -ForegroundColor Gray
+Write-Host "  -> Starting member VM deployment job..." -ForegroundColor Gray
+
+# DC job
+$dcJob = Start-Job -Name "DCDeploy" -ScriptBlock {
+    param($script, $os, $vmName, $domainName)
+    & $script -OS $os -VMName $vmName -DomainName $domainName
+    $LASTEXITCODE
+} -ArgumentList $dcScriptPath, $DCOS, $DCName, $DomainName
+
+# Member VM job
+$deployJob = Start-Job -Name "MemberDeploy" -ScriptBlock {
+    param($script, $vmList, $os)
+    & $script -VMName $vmList -OS $os
+    $LASTEXITCODE
+} -ArgumentList $deployScriptPath, $VMListString, $MemberOS
+
+# Stream job output live to the transcript
+Write-Host "`nWaiting for deployment jobs to complete (streaming output below)..." -ForegroundColor Cyan
+
+$pollInterval = 5   # seconds between output polls
+while ($true) {
+    # Flush any pending output from both jobs
+    $dcJob     | Receive-Job | ForEach-Object { Write-Host "  [DC]     $_" }
+    $deployJob | Receive-Job | ForEach-Object { Write-Host "  [MEMBER] $_" }
+
+    $dcDone     = $dcJob.State     -in @('Completed','Failed','Stopped')
+    $deployDone = $deployJob.State -in @('Completed','Failed','Stopped')
+
+    if ($dcDone -and $deployDone) { break }
+
+    Start-Sleep -Seconds $pollInterval
+}
+
+# Final flush after both jobs finish
+$dcJob     | Receive-Job | ForEach-Object { Write-Host "  [DC]     $_" }
+$deployJob | Receive-Job | ForEach-Object { Write-Host "  [MEMBER] $_" }
+
+# Collect results
+$dcJobInfo     = Get-Job -Name "DCDeploy"
+$deployJobInfo = Get-Job -Name "MemberDeploy"
+
+$dcSuccess     = ($dcJobInfo.State -eq 'Completed')
+$deploySuccess = ($deployJobInfo.State -eq 'Completed')
+
+Write-Host "`n=== Deployment Results ===" -ForegroundColor Cyan
+if ($dcSuccess) {
+    Write-Host "  [OK]   Domain Controller deployment completed" -ForegroundColor Green
+} else {
+    Write-Host "  [FAIL] Domain Controller deployment failed (job state: $($dcJobInfo.State))" -ForegroundColor Red
+    Write-Error "createDC.ps1 failed."
+    Exit-Script 1
+}
+
+if ($deploySuccess) {
+    Write-Host "  [OK]   Member VM deployment completed" -ForegroundColor Green
+} else {
+    Write-Host "  [FAIL] Member VM deployment failed (job state: $($deployJobInfo.State))" -ForegroundColor Red
+    Write-Error "deploy.ps1 failed."
+    Exit-Script 1
+}
+
+# Clean up job objects
+Remove-Job -Name "DCDeploy","MemberDeploy" -Force -ErrorAction SilentlyContinue
+
+Write-Host "`nAll VMs deployed successfully via parallel jobs." -ForegroundColor Green
 
 Write-Host "`nWaiting 2 minutes for all VMs to initialise..." -ForegroundColor Cyan
 Start-Sleep -Seconds 120

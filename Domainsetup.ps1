@@ -53,28 +53,99 @@ function Show-RetryMessage ([string]$Stage) {
 
 $currentDir = $PSScriptRoot
 
-# ─── Step 1: Deploy Domain Controller ────────────────────────────────────────
-Write-Host "`nStarting Domain Controller creation..." -ForegroundColor Cyan
-& (Join-Path $currentDir "createDC.ps1") -OS $DCOS -VMName $DCName -DomainName $DomainName
-if ($LASTEXITCODE -ne 0) {
-    Show-RetryMessage "DC DEPLOYMENT"
-    Exit-Script $LASTEXITCODE
+# ─── Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job ────
+# FIX: Start-Job inherits the parent's elevated token, so #Requires -RunAsAdministrator
+# in the child scripts is satisfied without needing -Verb RunAs or UAC prompts.
+Write-Host "`n=== Starting Parallel VM Deployment ===" -ForegroundColor Cyan
+Write-Host "  [1] Domain Controller: $DCName (OS: $DCOS)" -ForegroundColor Yellow
+Write-Host "  [2] Member VMs: $VMNames (OS: $VMOS)" -ForegroundColor Yellow
+
+$dcScriptPath     = Join-Path $currentDir "createDC.ps1"
+$deployScriptPath = Join-Path $currentDir "deploy.ps1"
+
+if (-not (Test-Path $dcScriptPath)) {
+    Write-Error "Child script not found: $dcScriptPath"
+    Exit-Script 1
+}
+if (-not (Test-Path $deployScriptPath)) {
+    Write-Error "Child script not found: $deployScriptPath"
+    Exit-Script 1
 }
 
-# ─── Step 2: Deploy member VMs ────────────────────────────────────────────────
-# BUG FIX: The original checked "$VMNames.Count -eq 0" — but $VMNames is a
-# [string], not an array, so .Count is always 1 for a non-empty string.
-# Check IsNullOrWhiteSpace instead.
+Write-Host "`nLaunching parallel deployment jobs..." -ForegroundColor Cyan
+Write-Host "  -> Starting DC deployment job..." -ForegroundColor Gray
+Write-Host "  -> Starting member VM deployment job..." -ForegroundColor Gray
+
+# DC job
+$dcJob = Start-Job -Name "DCDeploy" -ScriptBlock {
+    param($script, $os, $vmName, $domainName)
+    & $script -OS $os -VMName $vmName -DomainName $domainName
+    $LASTEXITCODE
+} -ArgumentList $dcScriptPath, $DCOS, $DCName, $DomainName
+
+# Member VM job (only if VMs specified)
 if ([string]::IsNullOrWhiteSpace($VMNames)) {
-    Write-Warning "No member VMs specified. Skipping member VM deployment."
+    Write-Warning "No member VMs specified. Deploying DC only."
+    $deployJob = $null
 } else {
-    Write-Host "`nDeploying member VMs..." -ForegroundColor Cyan
-    & (Join-Path $currentDir "deploy.ps1") -VMName $VMNames -OS $VMOS
-    if ($LASTEXITCODE -ne 0) {
-        Show-RetryMessage "MEMBER VM DEPLOYMENT"
-        Exit-Script $LASTEXITCODE
-    }
+    $deployJob = Start-Job -Name "MemberDeploy" -ScriptBlock {
+        param($script, $vmList, $os)
+        & $script -VMName $vmList -OS $os
+        $LASTEXITCODE
+    } -ArgumentList $deployScriptPath, $VMNames, $VMOS
 }
+
+# Stream job output live to the transcript
+Write-Host "`nWaiting for deployment jobs to complete (streaming output below)..." -ForegroundColor Cyan
+
+$pollInterval = 5   # seconds between output polls
+while ($true) {
+    # Flush any pending output from both jobs
+    if ($dcJob) { $dcJob | Receive-Job | ForEach-Object { Write-Host "  [DC]     $_" } }
+    if ($deployJob) { $deployJob | Receive-Job | ForEach-Object { Write-Host "  [MEMBER] $_" } }
+
+    $dcDone     = $null -eq $dcJob  -or $dcJob.State     -in @('Completed','Failed','Stopped')
+    $deployDone = $null -eq $deployJob -or $deployJob.State -in @('Completed','Failed','Stopped')
+
+    if ($dcDone -and $deployDone) { break }
+
+    Start-Sleep -Seconds $pollInterval
+}
+
+# Final flush after both jobs finish
+if ($dcJob) { $dcJob | Receive-Job | ForEach-Object { Write-Host "  [DC]     $_" } }
+if ($deployJob) { $deployJob | Receive-Job | ForEach-Object { Write-Host "  [MEMBER] $_" } }
+
+# Collect results
+$dcJobInfo     = Get-Job -Name "DCDeploy" -ErrorAction SilentlyContinue
+$deployJobInfo = Get-Job -Name "MemberDeploy" -ErrorAction SilentlyContinue
+
+$dcSuccess     = $null -eq $dcJobInfo  -or ($dcJobInfo.State -eq 'Completed')
+$deploySuccess = $null -eq $deployJobInfo -or ($deployJobInfo.State -eq 'Completed')
+
+Write-Host "`n=== Deployment Results ===" -ForegroundColor Cyan
+if ($dcSuccess) {
+    Write-Host "  [OK]   Domain Controller deployment completed" -ForegroundColor Green
+} else {
+    Write-Host "  [FAIL] Domain Controller deployment failed (job state: $($dcJobInfo.State))" -ForegroundColor Red
+    Show-RetryMessage "DC DEPLOYMENT"
+    Exit-Script 1
+}
+
+if ($null -eq $deployJobInfo) {
+    Write-Host "  [SKIP] Member VM deployment skipped (no VMs specified)" -ForegroundColor Gray
+} elseif ($deploySuccess) {
+    Write-Host "  [OK]   Member VM deployment completed" -ForegroundColor Green
+} else {
+    Write-Host "  [FAIL] Member VM deployment failed (job state: $($deployJobInfo.State))" -ForegroundColor Red
+    Show-RetryMessage "MEMBER VM DEPLOYMENT"
+    Exit-Script 1
+}
+
+# Clean up job objects
+Remove-Job -Name "DCDeploy","MemberDeploy" -Force -ErrorAction SilentlyContinue
+
+Write-Host "`nAll VMs deployed successfully via parallel jobs." -ForegroundColor Green
 
 # Give VMs time to fully boot before attempting domain join
 Write-Host "`nWaiting 60 seconds for VMs to initialise..." -ForegroundColor Cyan
