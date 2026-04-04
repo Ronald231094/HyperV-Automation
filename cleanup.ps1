@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# ─── Transcript Safety ────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript Safety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -11,7 +11,7 @@ if (-not $transcriptActive) {
 
 function Stop-Safe { if (-not $transcriptActive) { try { Stop-Transcript } catch { } } }
 
-# ─── Fetch registered VM names safely ────────────────────────────────────────
+# â”€â”€â”€ Fetch registered VM names safely â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 try {
     $vmNames = @(Get-VM -ErrorAction Stop | Select-Object -ExpandProperty Name)
 } catch {
@@ -25,7 +25,7 @@ if ($vmNames.Count -eq 0) {
     Stop-Safe; exit 0
 }
 
-# ─── Check each storage path ──────────────────────────────────────────────────
+# â”€â”€â”€ Check each storage path â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Resolve paths relative to the script's own location, not the caller's CWD.
 $basePaths = @(
     (Join-Path $PSScriptRoot "hyperv"),

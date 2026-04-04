@@ -7,7 +7,7 @@
     Hyper-V role install inside RDVH guests, and RDS VDI role configuration.
 
     Parallel deployment uses Start-Job (not Start-Process) so that child
-    jobs inherit the elevated token of the parent session — fixing the
+    jobs inherit the elevated token of the parent session â€” fixing the
     -196608 / #Requires -RunAsAdministrator failure that occurs when
     Start-Process spawns new windows without -Verb RunAs.
 #>
@@ -27,7 +27,7 @@ param(
     [string]   $DomainInitCode = ""
 )
 
-# ─── Transcript ───────────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -73,7 +73,7 @@ function Write-ReplayCommand {
 
 $currentDir = $PSScriptRoot
 
-# ─── Prompt for missing parameters ───────────────────────────────────────────
+# â”€â”€â”€ Prompt for missing parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not $DCName)     { $DCName     = Read-Host "Enter Domain Controller VM Name" }
 if (-not $DomainName) { $DomainName = Read-Host "Enter Domain Name (e.g., corp.local)" }
 if (-not $DCOS)       { $DCOS       = Read-Host "Enter OS for Domain Controller" }
@@ -137,7 +137,7 @@ foreach ($gw in $GWNames) {
     }
 }
 
-# ─── Credentials ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $seedPath = Join-Path $currentDir "sys_bootstrap.ini"
 if ([string]::IsNullOrWhiteSpace($DomainInitCode)) {
     if (-not (Test-Path $seedPath)) { Write-Error "sys_bootstrap.ini not found."; Exit-Script 1 }
@@ -150,7 +150,7 @@ if ([string]::IsNullOrWhiteSpace($DomainInitCode)) {
 $secureCode      = ConvertTo-SecureString $DomainInitCode -AsPlainText -Force
 $domainAdminCred = New-Object System.Management.Automation.PSCredential ("$DomainName\$DomainAdmin", $secureCode)
 
-# ─── Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job ──────────
+# â”€â”€â”€ Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # FIX: Start-Job inherits the parent's elevated token, so #Requires -RunAsAdministrator
 # in the child scripts is satisfied without needing -Verb RunAs or UAC prompts.
 # Start-Process without -Verb RunAs spawns a non-elevated child (exit code -196608).
@@ -175,7 +175,7 @@ Write-Host "`nLaunching parallel deployment jobs..." -ForegroundColor Cyan
 Write-Host "  -> Starting DC deployment job..." -ForegroundColor Gray
 Write-Host "  -> Starting member VM deployment job..." -ForegroundColor Gray
 
-# DC job — dot-sources createDC.ps1 inside the job runspace
+# DC job â€” dot-sources createDC.ps1 inside the job runspace
 $dcJob = Start-Job -Name "DCDeploy" -ScriptBlock {
     param($script, $os, $vmName, $domainName)
     & $script -OS $os -VMName $vmName -DomainName $domainName
@@ -183,14 +183,14 @@ $dcJob = Start-Job -Name "DCDeploy" -ScriptBlock {
     $LASTEXITCODE
 } -ArgumentList $dcScriptPath, $DCOS, $DCName, $DomainName
 
-# Member VM job — dot-sources deploy.ps1 inside the job runspace
+# Member VM job â€” dot-sources deploy.ps1 inside the job runspace
 $deployJob = Start-Job -Name "MemberDeploy" -ScriptBlock {
     param($script, $vmList, $os)
     & $script -VMName $vmList -OS $os
     $LASTEXITCODE
 } -ArgumentList $deployScriptPath, $VMListString, $MemberOS
 
-# ─── Stream job output live to the transcript ─────────────────────────────────
+# â”€â”€â”€ Stream job output live to the transcript â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`nWaiting for deployment jobs to complete (streaming output below)..." -ForegroundColor Cyan
 
 $pollInterval = 5   # seconds between output polls
@@ -211,7 +211,7 @@ while ($true) {
 $dcJob     | Receive-Job | ForEach-Object { Write-Host "  [DC]     $_" }
 $deployJob | Receive-Job | ForEach-Object { Write-Host "  [MEMBER] $_" }
 
-# ─── Collect results ──────────────────────────────────────────────────────────
+# â”€â”€â”€ Collect results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # The last value emitted by each job scriptblock is $LASTEXITCODE from the child script.
 # Receive-Job was already flushed above, so inspect child info directly.
 $dcJobInfo     = Get-Job -Name "DCDeploy"
@@ -248,7 +248,7 @@ if (-not $dcSuccess -or -not $deploySuccess) {
 
 Write-Host "`nAll VMs deployed successfully via parallel jobs." -ForegroundColor Green
 
-# ─── Verify all VMs are reachable before domain join ─────────────────────────
+# â”€â”€â”€ Verify all VMs are reachable before domain join â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`n=== Verifying VM Readiness ===" -ForegroundColor Cyan
 $allVMs              = @($DCName) + $VMNames
 $verificationTimeout = 300   # 5 minutes total
@@ -292,7 +292,7 @@ if ($allReady) {
     Exit-Script 1
 }
 
-# ─── Step 3: Domain Join ──────────────────────────────────────────────────────
+# â”€â”€â”€ Step 3: Domain Join â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $allToJoin = ($VMNames + @($CBName) | Select-Object -Unique) -join ','
 Write-Host "`nJoining all VMs to domain '$DomainName'..." -ForegroundColor Cyan
 & (Join-Path $currentDir "joindomain.ps1") `
@@ -303,7 +303,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "joindomain.ps1 failed."; Exit-Script 1 }
 Write-Host "`nWaiting 60 s for domain services to stabilise on all VMs..." -ForegroundColor Cyan
 Start-Sleep -Seconds 60
 
-# ─── Step 4: Enable Nested Virtualisation on RDVH VMs (host-side) ─────────────
+# â”€â”€â”€ Step 4: Enable Nested Virtualisation on RDVH VMs (host-side) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`n[Pre-RDS] Enabling nested virtualisation on RDVH VMs..." -ForegroundColor Cyan
 foreach ($vh in $VHNames) {
     Write-Host "  -> Processing: '$vh'..." -ForegroundColor Cyan
@@ -342,7 +342,7 @@ foreach ($vh in $VHNames) {
 Write-Host "`n[Pre-RDS] Waiting 60 s for RDVH VMs to fully boot..." -ForegroundColor Cyan
 Start-Sleep -Seconds 60
 
-# ─── Step 5: Install Hyper-V inside each RDVH guest ──────────────────────────
+# â”€â”€â”€ Step 5: Install Hyper-V inside each RDVH guest â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`n[Pre-RDS] Installing Hyper-V role inside RDVH guests..." -ForegroundColor Cyan
 foreach ($vh in $VHNames) {
     Write-Host "  -> Installing Hyper-V on '$vh'..." -ForegroundColor Cyan
@@ -375,7 +375,7 @@ foreach ($vh in $VHNames) {
 Write-Host "`n[Pre-RDS] Waiting 90 s for RDVH guests to reboot..." -ForegroundColor Cyan
 Start-Sleep -Seconds 90
 
-# ─── Step 6: RDS VDI Deployment ───────────────────────────────────────────────
+# â”€â”€â”€ Step 6: RDS VDI Deployment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $CBFQDN  = "$CBName.$DomainName"
 $WAFQDN  = "$WAName.$DomainName"
 $VHFQDNs = $VHNames | ForEach-Object { "$_.$DomainName" }
@@ -395,7 +395,7 @@ try {
     Exit-Script 1
 }
 
-# ─── Step 7: Gateway roles ────────────────────────────────────────────────────
+# â”€â”€â”€ Step 7: Gateway roles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 foreach ($gw in $GWNames) {
     $gwFQDN = "$gw.$DomainName"
     Write-Host "`nAdding RD Gateway role: $gwFQDN..." -ForegroundColor Cyan
@@ -408,7 +408,7 @@ foreach ($gw in $GWNames) {
     } catch { Write-Warning "Failed to add Gateway '$gwFQDN': $_" }
 }
 
-# ─── Step 8: Licensing roles ──────────────────────────────────────────────────
+# â”€â”€â”€ Step 8: Licensing roles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 foreach ($lic in $LicNames) {
     $licFQDN = "$lic.$DomainName"
     Write-Host "`nAdding RD Licensing role: $licFQDN..." -ForegroundColor Cyan

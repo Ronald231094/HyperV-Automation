@@ -8,7 +8,7 @@ param (
     [string]$JoinDomain
 )
 
-# ─── Transcript Safety ────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript Safety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -21,7 +21,7 @@ if (-not $transcriptActive) {
 function Stop-Safe { if (-not $transcriptActive) { try { Stop-Transcript } catch { } } }
 function Exit-Script ([int]$Code = 1) { Stop-Safe; exit $Code }
 
-# ─── Prompt for missing parameters ───────────────────────────────────────────
+# â”€â”€â”€ Prompt for missing parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not $DCName)     { $DCName     = Read-Host "Enter Domain Controller VM Name" }
 if (-not $DomainName) { $DomainName = Read-Host "Enter Domain Name (e.g., corp.local)" }
 if (-not $DCOS)       { $DCOS       = Read-Host "Enter OS for Domain Controller (2016, 2019, 2022, 2025)" }
@@ -37,7 +37,7 @@ if (-not $JoinDomain) {
 # any accidental whitespace from interactive input.
 $shouldJoin = $JoinDomain -in @('yes', 'y')
 
-# ─── Build retry command (quoted for safe re-execution) ───────────────────────
+# â”€â”€â”€ Build retry command (quoted for safe re-execution) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $retryCmd = ".\Domainsetup.ps1 -DCName `"$DCName`" -DomainName `"$DomainName`" -DCOS `"$DCOS`" -VMNames `"$VMNames`" -VMOS `"$VMOS`" -JoinDomain `"$JoinDomain`""
 
 function Show-RetryMessage ([string]$Stage) {
@@ -53,7 +53,7 @@ function Show-RetryMessage ([string]$Stage) {
 
 $currentDir = $PSScriptRoot
 
-# ─── Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job ────
+# â”€â”€â”€ Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job â”€â”€â”€â”€
 # FIX: Start-Job inherits the parent's elevated token, so #Requires -RunAsAdministrator
 # in the child scripts is satisfied without needing -Verb RunAs or UAC prompts.
 Write-Host "`n=== Starting Parallel VM Deployment ===" -ForegroundColor Cyan
@@ -151,7 +151,7 @@ Write-Host "`nAll VMs deployed successfully via parallel jobs." -ForegroundColor
 Write-Host "`nWaiting 60 seconds for VMs to initialise..." -ForegroundColor Cyan
 Start-Sleep -Seconds 60
 
-# ─── Step 3: Domain join (optional) ──────────────────────────────────────────
+# â”€â”€â”€ Step 3: Domain join (optional) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if ($shouldJoin) {
     if ([string]::IsNullOrWhiteSpace($VMNames)) {
         Write-Warning "No member VMs to join. Skipping domain join step."

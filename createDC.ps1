@@ -18,7 +18,7 @@ param (
     [System.Security.SecureString]$InitCode
 )
 
-# ─── Transcript Safety ────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript Safety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -35,7 +35,7 @@ Write-Host "`n=============================================" -ForegroundColor Cy
 Write-Host "  Domain Controller Provisioning"              -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 
-# ─── Credentials ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $currentDir = $PSScriptRoot
 $seedPath   = Join-Path $currentDir "sys_bootstrap.ini"
 
@@ -53,7 +53,7 @@ if (-not $InitCode) {
 }
 $adminCred = New-Object System.Management.Automation.PSCredential ("Administrator", $InitCode)
 
-# ─── Step 1: Deploy base VM ───────────────────────────────────────────────────
+# â”€â”€â”€ Step 1: Deploy base VM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`nStep 1: Deploying base VM..." -ForegroundColor Cyan
 & (Join-Path $currentDir "deploy.ps1") -VMName $VMName -OS $OS -InitCode $InitCode
 if ($LASTEXITCODE -ne 0) {
@@ -61,7 +61,7 @@ if ($LASTEXITCODE -ne 0) {
     Exit-Script 1
 }
 
-# ─── Step 2: Wait for guest IP ────────────────────────────────────────────────
+# â”€â”€â”€ Step 2: Wait for guest IP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`nStep 2: Waiting for guest IP address (up to 2 minutes)..." -ForegroundColor Cyan
 $ip         = $null
 $maxRetries = 24   # 24 x 5 s = 2 minutes
@@ -87,11 +87,11 @@ if (-not $ip) {
 }
 Write-Host "  [OK]  Guest IP: $ip" -ForegroundColor Green
 
-# ─── Step 3: Promote to Domain Controller ────────────────────────────────────
+# â”€â”€â”€ Step 3: Promote to Domain Controller â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`nStep 3: Promoting to Domain Controller (domain: $DomainName)..." -ForegroundColor Cyan
 
 # BUG FIX: Install-ADDSForest triggers an automatic reboot. The original code
-# had no error handling here — any failure (e.g. feature install issue) would
+# had no error handling here â€” any failure (e.g. feature install issue) would
 # silently continue. Added try/catch and checked that the command ran at all.
 # Also, Install-ADDSForest must be called AFTER Install-WindowsFeature completes
 # and the feature is fully available; the original had no intermediate check.
@@ -104,7 +104,7 @@ try {
             throw "Failed to install AD-Domain-Services. Feature install result: $($feat.ExitCode)"
         }
 
-        # Import the module explicitly — it may not auto-load inside PS Direct
+        # Import the module explicitly â€” it may not auto-load inside PS Direct
         Import-Module ADDSDeployment -ErrorAction Stop
 
         Install-ADDSForest `
@@ -128,7 +128,7 @@ try {
     Write-Host "  -> DC is rebooting as part of domain promotion (expected)." -ForegroundColor Yellow
 }
 
-# ─── Step 4: Wait for DC to come back up and be AD-ready ─────────────────────
+# â”€â”€â”€ Step 4: Wait for DC to come back up and be AD-ready â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # After Install-ADDSForest the DC reboots. We must wait until:
 #   (a) PS Direct can reconnect (guest OS is up), AND
 #   (b) the ADWS / Netlogon services are running (AD is functional)

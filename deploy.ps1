@@ -25,12 +25,12 @@ param (
     [System.Security.SecureString]$InitCode,
 
     # Skip the DHCP availability gate. Used by DHCP.ps1 when deploying the
-    # DHCP VM itself — at that point no DHCP server exists yet by definition.
+    # DHCP VM itself â€” at that point no DHCP server exists yet by definition.
     [Parameter(Mandatory = $false)]
     [switch]$SkipDHCPCheck
 )
 
-# ─── Transcript Safety ────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript Safety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -47,7 +47,7 @@ Write-Host "`n=============================================" -ForegroundColor Cy
 Write-Host "  VM Deployment Engine" -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 
-# ─── Helper: Format-Bytes ─────────────────────────────────────────────────────
+# â”€â”€â”€ Helper: Format-Bytes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Format-Bytes ([int64]$Bytes) {
     if     ($Bytes -ge 1GB) { "{0:N2} GB" -f ($Bytes / 1GB) }
     elseif ($Bytes -ge 1MB) { "{0:N2} MB" -f ($Bytes / 1MB) }
@@ -55,7 +55,7 @@ function Format-Bytes ([int64]$Bytes) {
     else                    { "$Bytes B" }
 }
 
-# ─── Pre-flight ───────────────────────────────────────────────────────────────
+# â”€â”€â”€ Pre-flight â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "Running pre-flight checks..." -ForegroundColor Cyan
 
 $currentPrincipal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
@@ -69,22 +69,24 @@ if (-not (Get-Module -ListAvailable -Name Hyper-V -ErrorAction SilentlyContinue)
 }
 Write-Host "  [OK]  Pre-flight checks passed." -ForegroundColor Green
 
-# ─── Paths ────────────────────────────────────────────────────────────────────
+# â”€â”€â”€ Paths â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $currentDir      = $PSScriptRoot
 $goldImageFolder = Join-Path $currentDir "goldenImage"
 $vmBasePath      = Join-Path $currentDir "hyperv"
 
-# ─── Resolve VM names and image extension early (needed for disk check) ───────
+# â”€â”€â”€ Resolve VM names and image extension early (needed for disk check) â”€â”€â”€â”€â”€â”€â”€
 $vmNames = $VMName.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 if ($vmNames.Count -eq 0) {
     Write-Error "No VM names provided."
     Exit-Script 1
 }
 
-$fileExt = if ($OS -eq "2025" -or $OS -eq "11") { "vhdx" } else { "vhd" }
-$vmGen   = if ($OS -eq "2025" -or $OS -eq "11") { 2 }      else { 1 }
+# BUG FIX: Windows Server 2016 is Gen 2 and uses .vhdx format (win2016_disk.vhdx)
+# Original code treated 2016 as Gen 1 (.vhd), causing VHD not found errors.
+$fileExt = if ($OS -eq "2025" -or $OS -eq "11" -or $OS -eq "2016") { "vhdx" } else { "vhd" }
+$vmGen   = if ($OS -eq "2025" -or $OS -eq "11" -or $OS -eq "2016") { 2 }      else { 1 }
 
-# ─── Locate golden image ──────────────────────────────────────────────────────
+# â”€â”€â”€ Locate golden image â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not (Test-Path $goldImageFolder)) {
     Write-Error "Golden image folder not found: $goldImageFolder"
     Exit-Script 1
@@ -106,7 +108,7 @@ if ($goldImages.Count -gt 1) {
     Write-Warning "Multiple golden images found for OS=$OS. Using: $($goldImage.Name)"
 }
 
-# ─── Disk space validation ────────────────────────────────────────────────────
+# â”€â”€â”€ Disk space validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "Validating disk space..." -ForegroundColor Cyan
 
 # BUG FIX: Substring(0,1) assumes a drive-letter path. Use Split-Path + Get-Item
@@ -128,7 +130,7 @@ if ($null -eq $diskSpace) {
     Write-Host "  [OK]  Sufficient disk space ($(Format-Bytes $diskSpace) free)" -ForegroundColor Green
 }
 
-# ─── Read switch configuration ────────────────────────────────────────────────
+# â”€â”€â”€ Read switch configuration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $switchFile = Join-Path $currentDir "switch.txt"
 $switchName = "NATSwitch"
 $dhcpStart  = "192.168.1.2"
@@ -145,7 +147,7 @@ if (Test-Path $switchFile) {
 }
 Write-Host "Using virtual switch: $switchName"
 
-# ─── DHCP availability check ──────────────────────────────────────────────────
+# â”€â”€â”€ DHCP availability check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Skipped when -SkipDHCPCheck is passed (e.g. DHCP.ps1 bootstrapping the DHCP VM).
 if ($SkipDHCPCheck) {
     Write-Host "Skipping DHCP availability check (-SkipDHCPCheck specified)." -ForegroundColor Yellow
@@ -214,7 +216,7 @@ if ($SkipDHCPCheck) {
     }
 }
 
-# ─── Credentials ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not $InitCode) {
     $seedPath = Join-Path $currentDir "sys_bootstrap.ini"
     if (-not (Test-Path $seedPath)) {
@@ -232,7 +234,7 @@ if (-not $InitCode) {
 # Build administrator credentials for guest OS access
 $adminCred = New-Object System.Management.Automation.PSCredential ("Administrator", $InitCode)
 
-# ─── Pre-validate: no VM name collisions ──────────────────────────────────────
+# â”€â”€â”€ Pre-validate: no VM name collisions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 foreach ($vmName in $vmNames) {
     if (Get-VM -Name $vmName -ErrorAction SilentlyContinue) {
         Write-Error "VM '$vmName' already exists in Hyper-V. Remove it first or use a different name."
@@ -240,7 +242,7 @@ foreach ($vmName in $vmNames) {
     }
 }
 
-# ─── Prepare destination folders ──────────────────────────────────────────────
+# â”€â”€â”€ Prepare destination folders â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not (Test-Path $vmBasePath)) {
     New-Item -Path $vmBasePath -ItemType Directory | Out-Null
 }
@@ -254,7 +256,7 @@ foreach ($vmName in $vmNames) {
     New-Item -Path $vmPath -ItemType Directory | Out-Null
 }
 
-# ─── Parallel robocopy ────────────────────────────────────────────────────────
+# â”€â”€â”€ Parallel robocopy â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`nStarting parallel VHD copy for $($vmNames.Count) VM(s)..." -ForegroundColor Cyan
 
 # Diagnostic: Verify golden image and destination paths before starting robocopy
@@ -324,7 +326,6 @@ foreach ($vmName in $vmNames) {
 foreach ($vmName in $vmNames) {
     $vmPath = Join-Path $vmBasePath $vmName
     $oldPath = Join-Path $vmPath $goldImage.Name
-    $newPath = Join-Path $vmPath "$vmName.$fileExt"
     
     if (Test-Path $oldPath) {
         Rename-Item -Path $oldPath -NewName "$vmName.$fileExt" -ErrorAction Stop
@@ -332,7 +333,7 @@ foreach ($vmName in $vmNames) {
     }
 }
 
-# ─── Create VMs ───────────────────────────────────────────────────────────────
+# â”€â”€â”€ Create VMs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 foreach ($vmName in $vmNames) {
     $vmPath = Join-Path $vmBasePath $vmName
     $vhdPath = Join-Path $vmPath "$vmName.$fileExt"
@@ -354,7 +355,7 @@ foreach ($vmName in $vmNames) {
     }
 }
 
-# ─── Verify and fix computer names in OS ──────────────────────────────────────
+# â”€â”€â”€ Verify and fix computer names in OS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 Write-Host "`nVerifying computer names in guest OS..." -ForegroundColor Cyan
 $hostnameVerified = $false
 $maxRetries = 72  # 72 x 15 s = 18 minutes

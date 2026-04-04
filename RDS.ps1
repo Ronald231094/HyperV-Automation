@@ -22,7 +22,7 @@ param(
     [string]   $DomainInitCode = ""
 )
 
-# ─── Transcript ───────────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -37,7 +37,7 @@ function Exit-Script ([int]$Code = 1) { Stop-Safe; exit $Code }
 
 $currentDir = $PSScriptRoot
 
-# ─── Prompt for missing parameters ───────────────────────────────────────────
+# â”€â”€â”€ Prompt for missing parameters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not $DCName)    { $DCName    = Read-Host "Enter Domain Controller VM Name" }
 if (-not $DomainName){ $DomainName= Read-Host "Enter Domain Name (e.g., corp.local)" }
 if (-not $DCOS)      { $DCOS      = Read-Host "Enter OS for Domain Controller" }
@@ -93,7 +93,7 @@ foreach ($gw in $GWNames) {
     }
 }
 
-# ─── Credentials ──────────────────────────────────────────────────────────────
+# â”€â”€â”€ Credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $seedPath = Join-Path $currentDir "sys_bootstrap.ini"
 if ([string]::IsNullOrWhiteSpace($DomainInitCode)) {
     if (-not (Test-Path $seedPath)) {
@@ -109,7 +109,7 @@ if ([string]::IsNullOrWhiteSpace($DomainInitCode)) {
 $secureCode      = ConvertTo-SecureString $DomainInitCode -AsPlainText -Force
 $domainAdminCred = New-Object System.Management.Automation.PSCredential ("$DomainName\$DomainAdmin", $secureCode)
 
-# ─── Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job ────
+# â”€â”€â”€ Step 1 & 2: Parallel DC and Member VM Deployment via Start-Job â”€â”€â”€â”€
 # FIX: Start-Job inherits the parent's elevated token, so #Requires -RunAsAdministrator
 # in the child scripts is satisfied without needing -Verb RunAs or UAC prompts.
 Write-Host "`n=== Starting Parallel VM Deployment ===" -ForegroundColor Cyan
@@ -200,8 +200,8 @@ Write-Host "`nAll VMs deployed successfully via parallel jobs." -ForegroundColor
 Write-Host "`nWaiting 2 minutes for all VMs to initialise..." -ForegroundColor Cyan
 Start-Sleep -Seconds 120
 
-# ─── Step 3: Domain Join ──────────────────────────────────────────────────────
-# BUG FIX: The original built $AllVMsToJoin but the logic was wrong — if CBName
+# â”€â”€â”€ Step 3: Domain Join â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# BUG FIX: The original built $AllVMsToJoin but the logic was wrong â€” if CBName
 # was already in $VMNames the result was just $VMNames, but it used array +
 # string concatenation which can produce unexpected results in PowerShell.
 # Use Select-Object -Unique on a clean array instead.
@@ -215,7 +215,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "joindomain.ps1 failed."; Exit-Script 1 }
 Write-Host "`nWaiting 60 s for domain services to stabilise on all VMs..." -ForegroundColor Cyan
 Start-Sleep -Seconds 60
 
-# ─── Step 4: RDS Session Deployment ──────────────────────────────────────────
+# â”€â”€â”€ Step 4: RDS Session Deployment â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $CBFQDN  = "$CBName.$DomainName"
 $WAFQDN  = "$WAName.$DomainName"
 $SHFQDNs = $SHNames | ForEach-Object { "$_.$DomainName" }
@@ -235,7 +235,7 @@ try {
     Exit-Script 1
 }
 
-# ─── Step 5: Add Gateway roles ────────────────────────────────────────────────
+# â”€â”€â”€ Step 5: Add Gateway roles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 foreach ($gw in $GWNames) {
     $gwFQDN = "$gw.$DomainName"
     Write-Host "`nAdding RD Gateway role: $gwFQDN..." -ForegroundColor Cyan
@@ -250,7 +250,7 @@ foreach ($gw in $GWNames) {
     }
 }
 
-# ─── Step 6: Add Licensing roles ──────────────────────────────────────────────
+# â”€â”€â”€ Step 6: Add Licensing roles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 foreach ($lic in $LicNames) {
     $licFQDN = "$lic.$DomainName"
     Write-Host "`nAdding RD Licensing role: $licFQDN..." -ForegroundColor Cyan

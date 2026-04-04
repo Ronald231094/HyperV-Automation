@@ -3,7 +3,7 @@ param (
     [switch]$Default
 )
 
-# ─── Transcript Safety ────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript Safety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -18,7 +18,7 @@ if (-not $transcriptActive) {
 function Stop-Safe { if (-not $transcriptActive) { try { Stop-Transcript } catch { } } }
 function Exit-Script ([int]$Code = 1) { Stop-Safe; exit $Code }
 
-# ─── Hyper-V pre-flight check ─────────────────────────────────────────────────
+# â”€â”€â”€ Hyper-V pre-flight check â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not (Get-Module -ListAvailable -Name Hyper-V -ErrorAction SilentlyContinue)) {
     Write-Host ""
     Write-Host "ERROR: Hyper-V is not installed or not enabled on this host." -ForegroundColor Red
@@ -41,7 +41,7 @@ if (-not (Get-Module -ListAvailable -Name Hyper-V -ErrorAction SilentlyContinue)
 $currentDir = $PSScriptRoot
 $switchName = "NATSwitch"
 
-# ─── Determine switch name ────────────────────────────────────────────────────
+# â”€â”€â”€ Determine switch name â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if ($Default) {
     Write-Host "Using default network range: 192.168.1.0/24 and switch name: $switchName"
     $networkInput = "192.168.1.0/24"
@@ -59,7 +59,7 @@ if ($Default) {
 $natName      = "${switchName}_NAT"
 $skipCreation = $false
 
-# ─── Check if switch already exists ───────────────────────────────────────────
+# â”€â”€â”€ Check if switch already exists â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $existingSwitch = Get-VMSwitch -Name $switchName -ErrorAction SilentlyContinue
 if ($existingSwitch) {
     Write-Host ""
@@ -122,7 +122,7 @@ if ($existingSwitch) {
     $skipCreation = $true
 }
 
-# ─── Prompt for network range (only when creating a new switch) ───────────────
+# â”€â”€â”€ Prompt for network range (only when creating a new switch) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not $skipCreation -and -not $Default) {
     Write-Host ""
     Write-Host "Enter the network range in CIDR notation (private /24 only)."
@@ -136,7 +136,7 @@ if (-not $skipCreation -and -not $Default) {
     }
 }
 
-# ─── Validate and create switch ───────────────────────────────────────────────
+# â”€â”€â”€ Validate and create switch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if (-not $skipCreation) {
     # Auto-append /24 for bare IPs
     if ($networkInput -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
@@ -223,7 +223,7 @@ if (-not $skipCreation) {
     }
 }
 
-# ─── Write switch.txt ─────────────────────────────────────────────────────────
+# â”€â”€â”€ Write switch.txt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $switchFile   = Join-Path $currentDir "switch.txt"
 $switchConfig = @"
 SwitchName=$switchName

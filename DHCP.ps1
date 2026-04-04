@@ -1,5 +1,5 @@
 #Requires -RunAsAdministrator
-# ─── Transcript Safety ────────────────────────────────────────────────────────
+# â”€â”€â”€ Transcript Safety â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $transcriptActive = $false
 try { $transcriptActive = $null -ne (Get-Transcript -ErrorAction SilentlyContinue) } catch { }
 if (-not $transcriptActive) {
@@ -14,7 +14,7 @@ function Exit-Script ([int]$Code = 1) { Stop-Safe; exit $Code }
 
 $currentDir = $PSScriptRoot
 
-# ─── Read network config from switch.txt ──────────────────────────────────────
+# â”€â”€â”€ Read network config from switch.txt â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $switchFile = Join-Path $currentDir "switch.txt"
 if (Test-Path $switchFile) {
     $switchMap = @{}
@@ -41,7 +41,7 @@ if (Test-Path $switchFile) {
     $dhcpEnd      = "192.168.1.254"
 }
 
-# ─── Detect host OS type ──────────────────────────────────────────────────────
+# â”€â”€â”€ Detect host OS type â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 $osInfo    = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
 $isServer  = $osInfo.ProductType -ne 1   # 1 = Workstation; 2 = DC; 3 = Server
 $installOnHost = $false
@@ -60,7 +60,7 @@ if ($isServer) {
     if ($response -match '^[Yy]$') { $installOnHost = $true }
 }
 
-# ─── Option A: Install DHCP on host ───────────────────────────────────────────
+# â”€â”€â”€ Option A: Install DHCP on host â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if ($installOnHost) {
     Write-Host "`nInstalling DHCP role on local host..." -ForegroundColor Cyan
 
@@ -111,7 +111,7 @@ if ($installOnHost) {
         Exit-Script 1
     }
 
-# ─── Option B: Deploy DHCP as a standalone VM ─────────────────────────────────
+# â”€â”€â”€ Option B: Deploy DHCP as a standalone VM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 } else {
     $vmName = "DHCP"
 
@@ -152,7 +152,7 @@ if ($installOnHost) {
         try {
             Invoke-Command -VMName $vmName -Credential $adminCred -ErrorAction Stop `
                            -ScriptBlock { $true } | Out-Null
-            $ready = $true   # success — exit loop immediately
+            $ready = $true   # success â€” exit loop immediately
         } catch {
             Start-Sleep -Seconds 5   # only sleep on genuine failure
         }
@@ -162,7 +162,7 @@ if ($installOnHost) {
         Exit-Script 1
     }
 
-    # ── Phase 1: install feature + set static IP, then reboot ───────────────────
+    # â”€â”€ Phase 1: install feature + set static IP, then reboot â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     # ALL DHCP service cmdlets (Add-DhcpServerv4Scope, Set-DhcpServerv4OptionValue,
     # Set-DhcpServerv4Binding) require the DHCP Windows Service to be running.
     # That service only starts after the post-feature-install reboot completes.
@@ -174,11 +174,11 @@ if ($installOnHost) {
         Invoke-Command -VMName $vmName -Credential $adminCred -ErrorAction Stop -ScriptBlock {
             param($gw, $start, $prefix)
 
-            # ── Step 1: assign static IP before installing anything ────────────────
+            # â”€â”€ Step 1: assign static IP before installing anything â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             # The DHCP VM has no DHCP server to get a lease from (it IS the DHCP
             # server). Its NIC will stay APIPA indefinitely. Find the first non-
             # loopback physical adapter by interface index and assign the static IP
-            # immediately — no waiting for a lease required.
+            # immediately â€” no waiting for a lease required.
             $staticIp = ($start -replace '\.\d+$', '.253')
             $adapter  = Get-NetAdapter -ErrorAction SilentlyContinue |
                         Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notmatch 'Loopback' } |
@@ -202,11 +202,11 @@ if ($installOnHost) {
                                        -ErrorAction SilentlyContinue
             Write-Host "  -> Static IP $staticIp set on '$alias'."
 
-            # ── Step 2: install DHCP feature now that the NIC is configured ────────
+            # â”€â”€ Step 2: install DHCP feature now that the NIC is configured â”€â”€â”€â”€â”€â”€â”€â”€
             $feat = Install-WindowsFeature -Name DHCP -IncludeManagementTools -ErrorAction Stop
             if (-not $feat.Success) { throw "DHCP feature install failed." }
 
-            # Security group is a local group — safe to add pre-reboot.
+            # Security group is a local group â€” safe to add pre-reboot.
             Add-DhcpServerSecurityGroup -ErrorAction SilentlyContinue
 
             Write-Host "Feature installed. Rebooting..."
@@ -224,7 +224,7 @@ if ($installOnHost) {
         Write-Host "  -> DHCP VM rebooting after feature install (expected)." -ForegroundColor Yellow
     }
 
-    # ── Phase 2: scope, options, and binding — DHCP service is now running ───────
+    # â”€â”€ Phase 2: scope, options, and binding â€” DHCP service is now running â”€â”€â”€â”€â”€â”€â”€
     Write-Host "Waiting for DHCP VM to come back up after reboot (up to 3 minutes)..." -ForegroundColor Cyan
     $staticIp = ($dhcpStart -replace '\.\d+$', '.253')
     $ready2   = $false
@@ -247,14 +247,14 @@ if ($installOnHost) {
             param($gw, $netAddr, $mask, $start, $end)
 
             # The static IP was set in Phase 1, so discover the adapter the same
-            # way — first non-loopback adapter by index, no IP polling needed.
+            # way â€” first non-loopback adapter by index, no IP polling needed.
             $labAdapter = Get-NetAdapter -ErrorAction SilentlyContinue |
                           Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notmatch 'Loopback' } |
                           Sort-Object -Property ifIndex |
                           Select-Object -First 1
             if (-not $labAdapter) { throw "No active network adapter found in VM for DHCP binding." }
 
-            # Bind the DHCP service — service is now running post-reboot.
+            # Bind the DHCP service â€” service is now running post-reboot.
             Set-DhcpServerv4Binding -InterfaceAlias $labAdapter.InterfaceAlias `
                                     -BindingState $true -ErrorAction Stop
             Write-Host "  [OK]  DHCP bound to adapter: $($labAdapter.InterfaceAlias)"
